@@ -1034,3 +1034,10 @@ dialog.modal::backdrop { background: rgba(16, 42, 86, .55); backdrop-filter: blu
 .fv__brandin span { display: inline-block; animation: brand-wave 2.8s cubic-bezier(.3, 1.6, .5, 1) infinite; animation-delay: calc(var(--i) * .1s); }
 @keyframes brand-wave { 0%, 40%, 100% { transform: translateY(0); color: var(--ink); } 15% { transform: translateY(-16px); color: var(--navy); } 25% { transform: translateY(0); } }
 @media (prefers-reduced-motion: reduce) { .fv__brandin span { animation: none; } }
+
+/* ===== 他社比較：AdKuru列を広く ===== */
+.otable { table-layout: fixed; }
+.otable .otable__main { width: 26%; }
+.otable thead .is-main { font-size: 22px; }
+.otable td.is-main { font-size: 18px; }
+.otable__cr span { display: block; white-space: nowrap; font-size: 14px; }
