@@ -30,7 +30,7 @@ function setup() {
       ['項目', '値'],
       ['予約カレンダーID', ''],
       ['予約の目印（説明文に含まれる文字）', 'timerex.net'],
-      ['サイトURL', 'https://general0721.github.io/adkuru-service-site/'],
+      ['サイトURL', 'https://recruit.adkuru.com/'],
     ]);
     conf.getRange('A1:B1').setFontWeight('bold').setBackground('#e8ebf3');
     conf.getRange('B2').setBackground('#fff6cf').setNote('予約が入るGoogleカレンダーのID（主催者のメールアドレス）を入れてください');
@@ -172,7 +172,7 @@ const ADK_C = { navy: '#254793', ink: '#102a56', pale: '#e8eef9', band: '#f5f8ff
 function beautify() {
   const ss = SpreadsheetApp.getActive();
   const conf = ss.getSheetByName(ADK.TAB_CONF);
-  const base = String(conf.getRange('B4').getValue() || 'https://general0721.github.io/adkuru-service-site/');
+  const base = String(conf.getRange('B4').getValue() || 'https://recruit.adkuru.com/');
 
   /* リンク作成：広告・投稿ごとにコードを登録すると配信用URLができる */
   const link = adkSheet_(ss, ADK_TAB_LINK);
