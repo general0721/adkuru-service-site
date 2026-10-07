@@ -1,6 +1,6 @@
 /* 流入経路：?src= / utm_* を覚えておき、予約完了時に集計シートへ送る（予約者には見えない） */
 (() => {
-  const ENDPOINT = ''; // GAS ウェブアプリの URL（デプロイ後に設定）
+  const ENDPOINT = 'https://script.google.com/macros/s/AKfycbzdGEwI_k-jz5YppZ_Zz5zCXF4fTM7EzhMz-xTczQOwq6KXdHp6tYYfN_C0-Llh0c9_gQ/exec'; // GAS ウェブアプリ（AdKuru 予約トラッカー）
   const KEY = 'adk_src';
   const TTL = 90 * 864e5;
   const read = () => { try { const v = JSON.parse(localStorage.getItem(KEY) || 'null'); return v && Date.now() - v.at < TTL ? v : null; } catch (e) { return null; } };
@@ -11,7 +11,7 @@
   const prev = read();
   const hit = pick('src') || pick('utm_source') || pick('utm_campaign');
   if (hit) {
-    write({ src: pick('src') || [pick('utm_source'), pick('utm_campaign')].filter(Boolean).join('/'), utm_source: pick('utm_source'), utm_medium: pick('utm_medium'), utm_campaign: pick('utm_campaign'), utm_content: pick('utm_content'), landing: location.pathname + location.search, referrer: document.referrer, first_at: prev ? prev.first_at : now, at: Date.now() });
+    write({ src: pick('src') || [pick('utm_source'), pick('utm_campaign')].filter(Boolean).join('/'), utm_source: pick('utm_source'), utm_medium: pick('utm_medium'), utm_campaign: pick('utm_campaign'), utm_content: pick('utm_content'), landing: (() => { try { return decodeURIComponent(location.pathname + location.search); } catch (e) { return location.pathname + location.search; } })(), referrer: document.referrer, first_at: prev ? prev.first_at : now, at: Date.now() });
   } else if (!prev) {
     let ref = '';
     try { ref = document.referrer ? new URL(document.referrer).hostname : ''; } catch (e) {}
