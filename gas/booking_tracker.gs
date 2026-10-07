@@ -54,6 +54,13 @@ function setup() {
   return 'ok';
 }
 
+/** A列に値がある最後の行（ARRAYFORMULA の空文字を数えない） */
+function adkLastRow_(sh) {
+  const v = sh.getRange('A1:A').getValues();
+  for (let i = v.length - 1; i >= 0; i--) if (v[i][0] !== '') return i + 1;
+  return 1;
+}
+
 function adkSheet_(ss, name) { return ss.getSheetByName(name) || ss.insertSheet(name); }
 function adkHead_(sh, head) {
   sh.getRange(1, 1, 1, head.length).setValues([head]).setFontWeight('bold').setBackground('#254793').setFontColor('#ffffff');
@@ -98,7 +105,8 @@ function syncBookings_() {
     .filter(ev => ev.getDateCreated() >= from && ev.getDateCreated() >= since);
 
   const book = ss.getSheetByName(ADK.TAB_BOOK);
-  const bookVals = book.getLastRow() > 1 ? book.getRange(2, 1, book.getLastRow() - 1, ADK_BOOK_HEAD.length).getValues() : [];
+  const bookLast = adkLastRow_(book);
+  const bookVals = bookLast > 1 ? book.getRange(2, 1, bookLast - 1, ADK_BOOK_HEAD.length).getValues() : [];
   const known = new Set(bookVals.map(r => r[9]));
 
   const log = ss.getSheetByName(ADK.TAB_LOG);
@@ -127,8 +135,8 @@ function syncBookings_() {
     rows.push([created, ev.getStartTime(), g.name, g.company, g.email, src, camp, cont, state, id]);
   });
   if (rows.length) {
-    book.getRange(book.getLastRow() + 1, 1, rows.length, ADK_BOOK_HEAD.length).setValues(rows);
-    book.getRange(2, 1, book.getLastRow() - 1, 2).setNumberFormat('yyyy/mm/dd hh:mm');
+    book.getRange(bookLast + 1, 1, rows.length, ADK_BOOK_HEAD.length).setValues(rows);
+    book.getRange(2, 1, bookLast - 1 + rows.length, 2).setNumberFormat('yyyy/mm/dd (ddd) hh:mm');
   }
   return rows.length + '件追加';
 }
