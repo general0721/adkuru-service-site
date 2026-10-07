@@ -1,3 +1,33 @@
+/* 流入経路：?src= / utm_* を覚えておき、予約完了時に集計シートへ送る（予約者には見えない） */
+(() => {
+  const ENDPOINT = ''; // GAS ウェブアプリの URL（デプロイ後に設定）
+  const KEY = 'adk_src';
+  const TTL = 90 * 864e5;
+  const read = () => { try { const v = JSON.parse(localStorage.getItem(KEY) || 'null'); return v && Date.now() - v.at < TTL ? v : null; } catch (e) { return null; } };
+  const write = (v) => { try { localStorage.setItem(KEY, JSON.stringify(v)); } catch (e) {} };
+  const q = new URLSearchParams(location.search);
+  const pick = (k) => (q.get(k) || '').slice(0, 120);
+  const now = new Date().toISOString();
+  const prev = read();
+  const hit = pick('src') || pick('utm_source') || pick('utm_campaign');
+  if (hit) {
+    write({ src: pick('src') || [pick('utm_source'), pick('utm_campaign')].filter(Boolean).join('/'), utm_source: pick('utm_source'), utm_medium: pick('utm_medium'), utm_campaign: pick('utm_campaign'), utm_content: pick('utm_content'), landing: location.pathname + location.search, referrer: document.referrer, first_at: prev ? prev.first_at : now, at: Date.now() });
+  } else if (!prev) {
+    let ref = '';
+    try { ref = document.referrer ? new URL(document.referrer).hostname : ''; } catch (e) {}
+    const self = ref && ref === location.hostname;
+    write({ src: self ? '直接' : (ref ? 'referral:' + ref : '直接'), landing: location.pathname, referrer: document.referrer, first_at: now, at: Date.now() });
+  }
+  let sid = '';
+  try { sid = sessionStorage.getItem('adk_sid') || Math.random().toString(36).slice(2, 10); sessionStorage.setItem('adk_sid', sid); } catch (e) {}
+  window.adkTrackBooking = () => {
+    if (!ENDPOINT) return;
+    const v = read() || { src: '不明' };
+    const body = JSON.stringify(Object.assign({}, v, { sid: sid, page: location.pathname }));
+    try { fetch(ENDPOINT, { method: 'POST', mode: 'no-cors', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: body, keepalive: true }); } catch (e) {}
+  };
+})();
+
 /* AdKuru サービスサイト */
 (() => {
   const header = document.getElementById('header');
@@ -95,7 +125,7 @@
       if (tries++ < 40) setTimeout(initCalendar, 250);
       return;
     }
-    try { window.TimerexCalendar(); inited = true; } catch (e) { /* 予備ボタンを出したまま */ }
+    try { window.TimerexCalendar({ onBookingComplete: () => window.adkTrackBooking && window.adkTrackBooking() }); inited = true; } catch (e) { /* 予備ボタンを出したまま */ }
   };
 
   // カレンダーが出るまでは「予約ページを開く」を見せる
