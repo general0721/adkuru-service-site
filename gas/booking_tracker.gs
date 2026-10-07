@@ -28,7 +28,7 @@ function setup() {
     conf.getRange(1, 1, 4, 2).setValues([
       ['項目', '値'],
       ['予約カレンダーID', ''],
-      ['予定タイトルに含まれる文字', 'SNS採用広告無料相談'],
+      ['予約の目印（説明文に含まれる文字）', 'timerex.net'],
       ['サイトURL', 'https://general0721.github.io/adkuru-service-site/'],
     ]);
     conf.getRange('A1:B1').setFontWeight('bold').setBackground('#e8ebf3');
@@ -85,14 +85,17 @@ function syncBookings_() {
   const calId = String(conf.getRange('B2').getValue()).trim();
   const keyword = String(conf.getRange('B3').getValue()).trim();
   if (!calId) return '設定!B2 にカレンダーIDがありません';
+  // 集計開始日時（これより前に作られた予約は対象外）
+  if (!conf.getRange('A5').getValue()) conf.getRange('A5:B5').setValues([['集計開始日時', new Date()]]);
+  const since = new Date(conf.getRange('B5').getValue());
   const cal = CalendarApp.getCalendarById(calId);
   if (!cal) return 'カレンダーが見つかりません：' + calId;
 
   const now = new Date();
   const from = new Date(now.getTime() - ADK.LOOKBACK_DAYS * 864e5);
   const to = new Date(now.getTime() + 180 * 864e5);
-  const events = cal.getEvents(from, to).filter(ev => !keyword || ev.getTitle().indexOf(keyword) >= 0 || (ev.getDescription() || '').indexOf('TimeRex') >= 0)
-    .filter(ev => ev.getDateCreated() >= from);
+  const events = cal.getEvents(from, to).filter(ev => !keyword || ev.getTitle().indexOf(keyword) >= 0 || (ev.getDescription() || '').indexOf(keyword) >= 0)
+    .filter(ev => ev.getDateCreated() >= from && ev.getDateCreated() >= since);
 
   const book = ss.getSheetByName(ADK.TAB_BOOK);
   const bookVals = book.getLastRow() > 1 ? book.getRange(2, 1, book.getLastRow() - 1, ADK_BOOK_HEAD.length).getValues() : [];
@@ -114,7 +117,7 @@ function syncBookings_() {
       if (diff < bestDiff) { best = i; bestDiff = diff; }
     });
     const g = adkGuest_(ev);
-    let src = '不明（サイト外から予約）', camp = '', cont = '', state = '未照合';
+    let src = '不明（サイトを通らない予約）', camp = '', cont = '', state = '未照合';
     if (best >= 0) {
       const r = logVals[best];
       src = r[1]; camp = r[4]; cont = r[5]; state = '照合済み';
@@ -140,12 +143,12 @@ function adkGuest_(ev) {
     }
     return '';
   };
-  let email = pick(['メールアドレス', 'Email', 'E-mail']);
+  let email = pick(['ゲストメールアドレス', 'メールアドレス', 'Email', 'E-mail']);
   if (!email) {
     const guest = ev.getGuestList().find(x => !/lic-inc\.co\.jp$/i.test(x.getEmail()));
     if (guest) email = guest.getEmail();
   }
-  return { name: pick(['名前', 'お名前', 'Name']), company: pick(['会社名', 'Company']), email: email };
+  return { name: pick(['ゲスト氏名', '氏名', 'お名前', '名前', 'Name']), company: pick(['ゲスト会社名', '会社名', 'Company']), email: email };
 }
 
 /** 手動実行用：照合をすぐ回す */
