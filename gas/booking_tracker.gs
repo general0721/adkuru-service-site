@@ -153,3 +153,130 @@ function adkGuest_(ev) {
 
 /** 手動実行用：照合をすぐ回す */
 function main() { return syncBookings_(); }
+
+/* ---------- 見やすく整える（何度実行してもOK） ---------- */
+const ADK_TAB_HOW = '見方';
+const ADK_TAB_LINK = 'リンク作成';
+const ADK_C = { navy: '#254793', ink: '#102a56', pale: '#e8eef9', band: '#f5f8ff', yellow: '#fff6cf', gray: '#9aa3b5', grayBg: '#f1f3f6', green: '#dff3ea', greenInk: '#1d7a52' };
+
+function beautify() {
+  const ss = SpreadsheetApp.getActive();
+  const conf = ss.getSheetByName(ADK.TAB_CONF);
+  const base = String(conf.getRange('B4').getValue() || 'https://general0721.github.io/adkuru-service-site/');
+
+  /* リンク作成：広告・投稿ごとにコードを登録すると配信用URLができる */
+  const link = adkSheet_(ss, ADK_TAB_LINK);
+  if (link.getLastRow() === 0) {
+    link.getRange('A1:E1').setValues([['経路名（シートに表示する名前）', '媒体', 'コード（英数字・記号 _ - のみ）', '配信用URL（自動）', 'メモ']]);
+    link.getRange('A2:E4').setValues([
+      ['Meta広告 A', 'Meta広告', 'meta_ad_A', '', '例：記入例。不要なら行ごと書き換えてください'],
+      ['TikTok広告', 'TikTok広告', 'tiktok_ad', '', ''],
+      ['Instagram投稿 10/7', 'Instagram投稿', 'insta_post_1007', '', ''],
+    ]);
+  }
+  link.getRange('D2').setFormula('=ARRAYFORMULA(IF(C2:C="","","' + base + '?src="&C2:C))');
+  adkStyleHead_(link, 5);
+  link.getRange('A2:C').setBackground(ADK_C.yellow);
+  link.getRange('D2:D').setBackground(ADK_C.grayBg).setFontColor(ADK_C.ink);
+  link.setColumnWidth(1, 220).setColumnWidth(2, 140).setColumnWidth(3, 200).setColumnWidth(4, 470).setColumnWidth(5, 300);
+  const media = SpreadsheetApp.newDataValidation().requireValueInList(['Meta広告', 'TikTok広告', 'X広告', 'LINE広告', 'YouTube広告', 'Instagram投稿', 'TikTok投稿', 'X投稿', 'メール・その他'], true).setAllowInvalid(true).build();
+  link.getRange('B2:B200').setDataValidation(media);
+  link.setTabColor(ADK_C.navy);
+
+  /* 予約一覧：見出しをわかりやすく＋経路名・媒体を自動表示 */
+  const book = ss.getSheetByName(ADK.TAB_BOOK);
+  book.getRange(1, 1, 1, 10).setValues([['予約を受けた日時', '面談日時', '名前', '会社名', 'メールアドレス', '流入コード', 'utm_campaign', 'utm_content', '照合', '予定ID（システム用）']]);
+  book.getRange('K1').setFormula('={"経路名";ARRAYFORMULA(IF(F2:F="","",IFERROR(VLOOKUP(F2:F,{\'' + ADK_TAB_LINK + '\'!C2:C,\'' + ADK_TAB_LINK + '\'!A2:A},2,FALSE),F2:F)))}');
+  book.getRange('L1').setFormula('={"媒体";ARRAYFORMULA(IF(F2:F="","",IFERROR(VLOOKUP(F2:F,{\'' + ADK_TAB_LINK + '\'!C2:C,\'' + ADK_TAB_LINK + '\'!B2:B},2,FALSE),"未登録")))}');
+  adkStyleHead_(book, 12);
+  book.getRange('K1:L1').setBackground('#ff7b72');
+  book.getRange('A2:B').setNumberFormat('yyyy/mm/dd (ddd) hh:mm');
+  book.getRange('F2:J').setFontColor(ADK_C.gray);
+  book.getRange('K2:L').setFontWeight('bold').setFontColor(ADK_C.ink);
+  [170, 170, 130, 200, 230, 130, 110, 110, 90, 140, 180, 120].forEach((w, i) => book.setColumnWidth(i + 1, w));
+  book.setFrozenColumns(0);
+  adkBand_(book, 12);
+  const rules = [
+    SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo('照合済み').setBackground(ADK_C.green).setFontColor(ADK_C.greenInk).setRanges([book.getRange('I2:I')]).build(),
+    SpreadsheetApp.newConditionalFormatRule().whenTextStartsWith('不明').setFontColor(ADK_C.gray).setRanges([book.getRange('K2:L')]).build(),
+  ];
+  book.setConditionalFormatRules(rules);
+  book.setTabColor('#ff7b72');
+
+  /* 流入経路別：経路名ごと・媒体ごと・月ごと */
+  const sum = ss.getSheetByName(ADK.TAB_SUM);
+  sum.clear();
+  sum.getCharts().forEach(c => sum.removeChart(c));
+  sum.getRange('A1').setValue('流入経路ごとの予約数').setFontSize(14).setFontWeight('bold').setFontColor(ADK_C.ink);
+  sum.getRange('A2').setValue('「予約一覧」から自動で集計しています。経路名は「リンク作成」で登録した名前で表示されます。').setFontColor(ADK_C.gray);
+  sum.getRange('A4:B4').setValues([['経路名', '予約数']]);
+  sum.getRange('A5').setFormula("=IFERROR(QUERY('" + ADK.TAB_BOOK + "'!K2:K,\"select K, count(K) where K is not null and K <> '' group by K order by count(K) desc label count(K) ''\",0),\"まだ予約がありません\")");
+  sum.getRange('D4:E4').setValues([['媒体', '予約数']]);
+  sum.getRange('D5').setFormula("=IFERROR(QUERY('" + ADK.TAB_BOOK + "'!L2:L,\"select L, count(L) where L is not null and L <> '' group by L order by count(L) desc label count(L) ''\",0),\"まだ予約がありません\")");
+  sum.getRange('G4:H4').setValues([['月', '予約数']]);
+  sum.getRange('G5').setFormula("=IFERROR(QUERY({ARRAYFORMULA(IF('" + ADK.TAB_BOOK + "'!A2:A=\"\",\"\",TEXT('" + ADK.TAB_BOOK + "'!A2:A,\"yyyy年m月\")))},\"select Col1, count(Col1) where Col1 <> '' group by Col1 order by Col1 label count(Col1) ''\",0),\"まだ予約がありません\")");
+  [sum.getRange('A4:B4'), sum.getRange('D4:E4'), sum.getRange('G4:H4')].forEach(r => r.setFontWeight('bold').setBackground(ADK_C.navy).setFontColor('#ffffff'));
+  sum.setColumnWidth(1, 220).setColumnWidth(2, 80).setColumnWidth(3, 30).setColumnWidth(4, 160).setColumnWidth(5, 80).setColumnWidth(6, 30).setColumnWidth(7, 120).setColumnWidth(8, 80);
+  sum.getRange('B5:B').setFontWeight('bold'); sum.getRange('E5:E').setFontWeight('bold'); sum.getRange('H5:H').setFontWeight('bold');
+  const chart = sum.newChart().asBarChart().addRange(sum.getRange('A4:B30')).setNumHeaders(1)
+    .setOption('title', '経路名ごとの予約数').setOption('legend', { position: 'none' }).setOption('colors', [ADK_C.navy])
+    .setPosition(4, 10, 0, 0).setOption('width', 520).setOption('height', 320).build();
+  sum.insertChart(chart);
+  sum.setTabColor('#f7ce0f');
+
+  /* 流入経路ログ・設定：システム用とわかるように */
+  const log = ss.getSheetByName(ADK.TAB_LOG);
+  log.getRange(1, 1, 1, ADK_LOG_HEAD.length).setBackground(ADK_C.gray).setFontColor('#ffffff');
+  log.setTabColor(ADK_C.gray);
+  conf.setTabColor(ADK_C.gray);
+  conf.getRange('B2:B3').setBackground(ADK_C.yellow);
+
+  /* 見方 */
+  const how = adkSheet_(ss, ADK_TAB_HOW);
+  how.clear();
+  const lines = [
+    ['このシートの見方', ''],
+    ['', ''],
+    ['見るところ', ''],
+    ['予約一覧', '予約が入ると15分以内に1行追加されます。「経路名」「媒体」でどこから来た予約かがわかります。'],
+    ['流入経路別', '経路名ごと・媒体ごと・月ごとの予約数をまとめています。'],
+    ['', ''],
+    ['広告・投稿を出すとき', ''],
+    ['1. リンク作成', '黄色の欄に「経路名」「媒体」「コード」を1行ずつ入れます。コードは英数字と _ - だけ。'],
+    ['2. URLをコピー', '「配信用URL（自動）」にできたURLを、その広告・投稿のリンク先に設定します。'],
+    ['3. あとは自動', 'そのURLから来て予約した人は、予約一覧にその経路名で表示されます。'],
+    ['', ''],
+    ['補足', ''],
+    ['不明（サイトを通らない予約）', 'TimeRexのURLを直接開いて予約した人です。サイトを通っていないので経路がわかりません。'],
+    ['媒体が「未登録」', 'コードが「リンク作成」に登録されていません。登録すると経路名・媒体が表示されます。'],
+    ['灰色のタブ', '流入経路ログ・設定はシステム用です。編集しないでください。'],
+  ];
+  how.getRange(1, 1, lines.length, 2).setValues(lines);
+  how.getRange('A1').setFontSize(16).setFontWeight('bold').setFontColor(ADK_C.ink);
+  ['A3', 'A7', 'A12'].forEach(a => how.getRange(a + ':' + a.replace('A', 'B')).setBackground(ADK_C.navy).setFontColor('#ffffff').setFontWeight('bold'));
+  how.getRange('A4:A15').setFontWeight('bold').setFontColor(ADK_C.ink);
+  how.setColumnWidth(1, 240).setColumnWidth(2, 640);
+  how.getRange('A1:B15').setVerticalAlignment('middle').setWrap(true);
+  how.setRowHeights(4, 12, 28);
+  how.setTabColor(ADK_C.ink);
+
+  /* タブの並び */
+  [ADK_TAB_HOW, ADK.TAB_BOOK, ADK.TAB_SUM, ADK_TAB_LINK, ADK.TAB_LOG, ADK.TAB_CONF].forEach((n, i) => {
+    ss.setActiveSheet(ss.getSheetByName(n)); ss.moveActiveSheet(i + 1);
+  });
+  ss.setActiveSheet(how);
+  ss.getSheets().forEach(sh => sh.getDataRange().setFontFamily('Arial'));
+  return 'ok';
+}
+
+function adkStyleHead_(sh, n) {
+  sh.getRange(1, 1, 1, n).setFontWeight('bold').setBackground(ADK_C.navy).setFontColor('#ffffff').setVerticalAlignment('middle');
+  sh.setRowHeight(1, 32);
+  sh.setFrozenRows(1);
+}
+
+function adkBand_(sh, n) {
+  sh.getBandings().forEach(b => b.remove());
+  sh.getRange(1, 1, Math.max(sh.getMaxRows(), 200), n).applyRowBanding(SpreadsheetApp.BandingTheme.LIGHT_GREY, true, false)
+    .setHeaderRowColor(ADK_C.navy).setFirstRowColor('#ffffff').setSecondRowColor(ADK_C.band);
+}
