@@ -1041,3 +1041,22 @@ dialog.modal::backdrop { background: rgba(16, 42, 86, .55); backdrop-filter: blu
 .otable thead .is-main { font-size: 22px; }
 .otable td.is-main { font-size: 18px; }
 .otable__cr span { display: block; white-space: nowrap; font-size: 14px; }
+
+/* ===== FV微調整：アドクル表記・吹き出し位置・［］あしらい・CTA文字位置 ===== */
+.fv__brand { display: flex; align-items: flex-end; gap: 14px; }
+.fv__kana { margin-bottom: 10px; font-family: var(--ff-ja); font-size: 22px; font-weight: 900; letter-spacing: .12em; color: var(--ink); }
+.fv__bubble { margin: 0 0 22px; }
+.fv__subin { position: relative; display: inline-block; padding: 6px 22px; }
+.fv__subin::before, .fv__subin::after { content: ""; position: absolute; top: 0; bottom: 0; width: 12px; border: 3px solid var(--coral); }
+.fv__subin::before { left: 0; border-right: 0; }
+.fv__subin::after { right: 0; border-left: 0; }
+.cbtn { padding: 12px 96px 12px 40px; }
+@media (max-width: 767px) {
+  .fv__brand { gap: 8px; }
+  .fv__kana { margin-bottom: 6px; font-size: 15px; }
+  .fv__bubble { margin-bottom: 16px; }
+  .fv__subin { padding: 4px 14px; }
+  .fv__subin::before, .fv__subin::after { width: 9px; border-width: 2px; }
+  .cbtn { padding: 10px 78px 10px 28px; }
+}
+@media (max-width: 767px) { .fv__brand { margin-top: 18px; } }
