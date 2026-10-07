@@ -189,7 +189,7 @@ function beautify() {
   link.getRange('A2:C').setBackground(ADK_C.yellow);
   link.getRange('D2:D').setBackground(ADK_C.grayBg).setFontColor(ADK_C.ink);
   link.setColumnWidth(1, 220).setColumnWidth(2, 140).setColumnWidth(3, 200).setColumnWidth(4, 470).setColumnWidth(5, 300);
-  const media = SpreadsheetApp.newDataValidation().requireValueInList(['Meta広告', 'TikTok広告', 'X広告', 'LINE広告', 'YouTube広告', 'Instagram投稿', 'TikTok投稿', 'X投稿', 'メール・その他'], true).setAllowInvalid(true).build();
+  const media = SpreadsheetApp.newDataValidation().requireValueInList(['リスティング広告', 'Meta広告', 'TikTok広告', 'X広告', 'LINE広告', 'YouTube広告', 'Instagram投稿', 'TikTok投稿', 'X投稿', 'メール・その他'], true).setAllowInvalid(true).build();
   link.getRange('B2:B200').setDataValidation(media);
   link.setTabColor(ADK_C.navy);
 
