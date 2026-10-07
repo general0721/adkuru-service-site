@@ -96,7 +96,11 @@ function syncBookings_() {
   // 集計開始日時（これより前に作られた予約は対象外）
   if (!conf.getRange('A5').getValue()) conf.getRange('A5:B5').setValues([['集計開始日時', new Date()]]);
   const since = new Date(conf.getRange('B5').getValue());
-  const cal = CalendarApp.getCalendarById(calId);
+  // 共有されたカレンダーは「参加」していないと開けないので、未参加なら参加する（表示はオフ）
+  let cal = CalendarApp.getCalendarById(calId);
+  if (!cal) {
+    try { cal = CalendarApp.subscribeToCalendar(calId, { selected: false }); } catch (e) { return 'カレンダーに参加できません：' + calId + ' ' + e; }
+  }
   if (!cal) return 'カレンダーが見つかりません：' + calId;
 
   const now = new Date();
