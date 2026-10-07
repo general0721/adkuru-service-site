@@ -18,7 +18,8 @@ const ADK = {
 };
 
 const ADK_LOG_HEAD = ['受信日時', '流入経路', 'utm_source', 'utm_medium', 'utm_campaign', 'utm_content', '最初に来たページ', 'リファラ', '初回訪問日時', 'セッションID', '照合済み'];
-const ADK_BOOK_HEAD = ['予約受付日時', '面談日時', '名前', '会社名', 'メールアドレス', '流入経路', 'utm_campaign', 'utm_content', '照合', '予定ID'];
+const ADK_BOOK_HEAD = ['予約を受けた日時', '面談日時', '会社名', '名前', '経路名', '媒体', 'メールアドレス', '流入コード', 'utm_campaign', 'utm_content', '照合', '予定ID（システム用）'];
+// E・F列（経路名・媒体）は数式で自動表示。スクリプトは A〜D と G〜L に書く
 
 /* ---------- 初期設定 ---------- */
 function setup() {
@@ -107,7 +108,7 @@ function syncBookings_() {
   const book = ss.getSheetByName(ADK.TAB_BOOK);
   const bookLast = adkLastRow_(book);
   const bookVals = bookLast > 1 ? book.getRange(2, 1, bookLast - 1, ADK_BOOK_HEAD.length).getValues() : [];
-  const known = new Set(bookVals.map(r => r[9]));
+  const known = new Set(bookVals.map(r => r[11]));
 
   const log = ss.getSheetByName(ADK.TAB_LOG);
   const logVals = log.getLastRow() > 1 ? log.getRange(2, 1, log.getLastRow() - 1, ADK_LOG_HEAD.length).getValues() : [];
@@ -132,10 +133,11 @@ function syncBookings_() {
       r[10] = id;
       log.getRange(best + 2, 11).setValue(id);
     }
-    rows.push([created, ev.getStartTime(), g.name, g.company, g.email, src, camp, cont, state, id]);
+    rows.push([created, ev.getStartTime(), g.company, g.name, null, null, g.email, src, camp, cont, state, id]);
   });
   if (rows.length) {
-    book.getRange(bookLast + 1, 1, rows.length, ADK_BOOK_HEAD.length).setValues(rows);
+    book.getRange(bookLast + 1, 1, rows.length, 4).setValues(rows.map(x => x.slice(0, 4)));
+    book.getRange(bookLast + 1, 7, rows.length, 6).setValues(rows.map(x => x.slice(6)));
     book.getRange(2, 1, bookLast - 1 + rows.length, 2).setNumberFormat('yyyy/mm/dd (ddd) hh:mm');
   }
   return rows.length + '件追加';
@@ -191,24 +193,23 @@ function beautify() {
   link.getRange('B2:B200').setDataValidation(media);
   link.setTabColor(ADK_C.navy);
 
-  /* 予約一覧：見出しをわかりやすく＋経路名・媒体を自動表示 */
+  /* 予約一覧：見出し＋経路名・媒体を自動表示（E・F列） */
   const book = ss.getSheetByName(ADK.TAB_BOOK);
-  book.getRange(1, 1, 1, 10).setValues([['予約を受けた日時', '面談日時', '名前', '会社名', 'メールアドレス', '流入コード', 'utm_campaign', 'utm_content', '照合', '予定ID（システム用）']]);
-  book.getRange('K1').setFormula('={"経路名";ARRAYFORMULA(IF(F2:F="","",IFERROR(VLOOKUP(F2:F,{\'' + ADK_TAB_LINK + '\'!C2:C,\'' + ADK_TAB_LINK + '\'!A2:A},2,FALSE),F2:F)))}');
-  book.getRange('L1').setFormula('={"媒体";ARRAYFORMULA(IF(F2:F="","",IFERROR(VLOOKUP(F2:F,{\'' + ADK_TAB_LINK + '\'!C2:C,\'' + ADK_TAB_LINK + '\'!B2:B},2,FALSE),"未登録")))}');
-  adkStyleHead_(book, 12);
-  book.getRange('K1:L1').setBackground('#ff7b72');
+  book.getRange(1, 1, 1, ADK_BOOK_HEAD.length).setValues([ADK_BOOK_HEAD]);
+  book.getRange('E1').setFormula('={"経路名";ARRAYFORMULA(IF(H2:H="","",IFERROR(VLOOKUP(H2:H,{\'' + ADK_TAB_LINK + '\'!C2:C,\'' + ADK_TAB_LINK + '\'!A2:A},2,FALSE),H2:H)))}');
+  book.getRange('F1').setFormula('={"媒体";ARRAYFORMULA(IF(H2:H="","",IF(LEFT(H2:H,2)="不明","ー",IFERROR(VLOOKUP(H2:H,{\'' + ADK_TAB_LINK + '\'!C2:C,\'' + ADK_TAB_LINK + '\'!B2:B},2,FALSE),"未登録"))))}');
+  adkStyleHead_(book, ADK_BOOK_HEAD.length);
+  book.getRange('E1:F1').setBackground('#ff7b72');
   book.getRange('A2:B').setNumberFormat('yyyy/mm/dd (ddd) hh:mm');
-  book.getRange('F2:J').setFontColor(ADK_C.gray);
-  book.getRange('K2:L').setFontWeight('bold').setFontColor(ADK_C.ink);
-  [170, 170, 130, 200, 230, 130, 110, 110, 90, 140, 180, 120].forEach((w, i) => book.setColumnWidth(i + 1, w));
-  book.setFrozenColumns(0);
-  adkBand_(book, 12);
-  const rules = [
-    SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo('照合済み').setBackground(ADK_C.green).setFontColor(ADK_C.greenInk).setRanges([book.getRange('I2:I')]).build(),
-    SpreadsheetApp.newConditionalFormatRule().whenTextStartsWith('不明').setFontColor(ADK_C.gray).setRanges([book.getRange('K2:L')]).build(),
-  ];
-  book.setConditionalFormatRules(rules);
+  book.getRange('E2:F').setFontWeight('bold').setFontColor(ADK_C.ink);
+  book.getRange('H2:L').setFontColor(ADK_C.gray);
+  book.getRange('H1:L1').setBackground(ADK_C.gray);
+  [165, 165, 200, 130, 180, 120, 230, 130, 110, 110, 90, 150].forEach((w, i) => book.setColumnWidth(i + 1, w));
+  adkBand_(book, ADK_BOOK_HEAD.length);
+  book.setConditionalFormatRules([
+    SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo('照合済み').setBackground(ADK_C.green).setFontColor(ADK_C.greenInk).setRanges([book.getRange('K2:K')]).build(),
+    SpreadsheetApp.newConditionalFormatRule().whenTextStartsWith('不明').setFontColor(ADK_C.gray).setRanges([book.getRange('E2:F')]).build(),
+  ]);
   book.setTabColor('#ff7b72');
 
   /* 流入経路別：経路名ごと・媒体ごと・月ごと */
@@ -218,9 +219,9 @@ function beautify() {
   sum.getRange('A1').setValue('流入経路ごとの予約数').setFontSize(14).setFontWeight('bold').setFontColor(ADK_C.ink);
   sum.getRange('A2').setValue('「予約一覧」から自動で集計しています。経路名は「リンク作成」で登録した名前で表示されます。').setFontColor(ADK_C.gray);
   sum.getRange('A4:B4').setValues([['経路名', '予約数']]);
-  sum.getRange('A5').setFormula("=IFERROR(QUERY('" + ADK.TAB_BOOK + "'!K2:K,\"select K, count(K) where K is not null and K <> '' group by K order by count(K) desc label count(K) ''\",0),\"まだ予約がありません\")");
+  sum.getRange('A5').setFormula("=IFERROR(QUERY('" + ADK.TAB_BOOK + "'!E2:E,\"select E, count(E) where E is not null and E <> '' group by E order by count(E) desc label count(E) ''\",0),\"まだ予約がありません\")");
   sum.getRange('D4:E4').setValues([['媒体', '予約数']]);
-  sum.getRange('D5').setFormula("=IFERROR(QUERY('" + ADK.TAB_BOOK + "'!L2:L,\"select L, count(L) where L is not null and L <> '' group by L order by count(L) desc label count(L) ''\",0),\"まだ予約がありません\")");
+  sum.getRange('D5').setFormula("=IFERROR(QUERY('" + ADK.TAB_BOOK + "'!F2:F,\"select F, count(F) where F is not null and F <> '' group by F order by count(F) desc label count(F) ''\",0),\"まだ予約がありません\")");
   sum.getRange('G4:H4').setValues([['月', '予約数']]);
   sum.getRange('G5').setFormula("=IFERROR(QUERY({ARRAYFORMULA(IF('" + ADK.TAB_BOOK + "'!A2:A=\"\",\"\",TEXT('" + ADK.TAB_BOOK + "'!A2:A,\"yyyy年m月\")))},\"select Col1, count(Col1) where Col1 <> '' group by Col1 order by Col1 label count(Col1) ''\",0),\"まだ予約がありません\")");
   [sum.getRange('A4:B4'), sum.getRange('D4:E4'), sum.getRange('G4:H4')].forEach(r => r.setFontWeight('bold').setBackground(ADK_C.navy).setFontColor('#ffffff'));
