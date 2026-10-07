@@ -118,6 +118,14 @@
   if (!modal || !modal.showModal) return; // 非対応ブラウザは href どおり予約ページへ
   let inited = false, tries = 0;
 
+  // Google 広告のコンバージョン（同じページでは各1回まで）
+  const sentCv = {};
+  const adsCv = (sendTo, withValue) => {
+    if (!sendTo || sentCv[sendTo] || typeof window.gtag !== 'function') return;
+    sentCv[sendTo] = true;
+    try { window.gtag('event', 'conversion', withValue ? { send_to: sendTo, value: 1.0, currency: 'JPY' } : { send_to: sendTo }); } catch (e) {}
+  };
+
   // embed.js は window.TimerexCalendar を定義するだけなので、開いたときに呼ぶ
   const initCalendar = () => {
     if (inited) return;
@@ -125,7 +133,7 @@
       if (tries++ < 40) setTimeout(initCalendar, 250);
       return;
     }
-    try { window.TimerexCalendar({ onBookingComplete: () => window.adkTrackBooking && window.adkTrackBooking() }); inited = true; } catch (e) { /* 予備ボタンを出したまま */ }
+    try { window.TimerexCalendar({ onBookingComplete: () => { window.adkTrackBooking && window.adkTrackBooking(); adsCv(window.ADKURU_CV_DONE, true); } }); inited = true; } catch (e) { /* 予備ボタンを出したまま */ }
   };
 
   // カレンダーが出るまでは「予約ページを開く」を見せる
@@ -144,6 +152,7 @@
     if (!b) return;
     e.preventDefault();
     modal.showModal();
+    adsCv(window.ADKURU_CV);
     document.body.style.overflow = 'hidden';
     initCalendar();
     watchFallback();
