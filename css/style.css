@@ -1063,3 +1063,10 @@ dialog.modal::backdrop { background: rgba(16, 42, 86, .55); backdrop-filter: blu
   .cbtn { padding: 10px 78px 10px 28px; }
 }
 @media (max-width: 767px) { .fv__brand { margin-top: 18px; } }
+
+/* 「SNS広告採用とは」の説明文 */
+.bridge__lead { max-width: 760px; margin: -32px auto 48px; text-align: center; font-size: 15px; line-height: 1.95; color: var(--text-sub); }
+.bridge__lead b { color: var(--ink); }
+@media (max-width: 768px) {
+  .bridge__lead { margin: -16px auto 32px; font-size: 14px; text-align: left; }
+}
