@@ -1,29 +1,114 @@
-/* 流入経路：?src= / utm_* を覚えておき、予約完了時に集計シートへ送る（予約者には見えない） */
+/* 流入経路・アクセス計測：?src= / utm_* を覚えておき、閲覧・離脱・相談ボタン・予約完了を集計シートへ送る（見ている人には見えない）
+   - bot・自動ブラウザは送らない。社内の確認は一度 ?staff=1 を付けて開くと、そのブラウザは以後計測しない（?staff=0 で解除） */
 (() => {
   const ENDPOINT = 'https://script.google.com/macros/s/AKfycbzdGEwI_k-jz5YppZ_Zz5zCXF4fTM7EzhMz-xTczQOwq6KXdHp6tYYfN_C0-Llh0c9_gQ/exec'; // GAS ウェブアプリ（AdKuru 予約トラッカー）
   const KEY = 'adk_src';
   const TTL = 90 * 864e5;
-  const read = () => { try { const v = JSON.parse(localStorage.getItem(KEY) || 'null'); return v && Date.now() - v.at < TTL ? v : null; } catch (e) { return null; } };
-  const write = (v) => { try { localStorage.setItem(KEY, JSON.stringify(v)); } catch (e) {} };
+  const ls = { get: (k) => { try { return localStorage.getItem(k); } catch (e) { return null; } }, set: (k, v) => { try { localStorage.setItem(k, v); } catch (e) {} }, del: (k) => { try { localStorage.removeItem(k); } catch (e) {} } };
+  const ss = { get: (k) => { try { return sessionStorage.getItem(k); } catch (e) { return null; } }, set: (k, v) => { try { sessionStorage.setItem(k, v); } catch (e) {} } };
+  const read = () => { try { const v = JSON.parse(ls.get(KEY) || 'null'); return v && Date.now() - v.at < TTL ? v : null; } catch (e) { return null; } };
+  const write = (v) => ls.set(KEY, JSON.stringify(v));
+  const rid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
   const q = new URLSearchParams(location.search);
   const pick = (k) => (q.get(k) || '').slice(0, 120);
   const now = new Date().toISOString();
+
+  // 今回の流入元（URLのパラメータ → 参照元の順で判定）
+  let refHost = '';
+  try { refHost = document.referrer ? new URL(document.referrer).hostname : ''; } catch (e) {}
+  const fromRef = (h) => {
+    if (!h) return '直接';
+    if (h === location.hostname) return '直接';
+    if (/(^|\.)google\./.test(h)) return 'Google検索';
+    if (/(^|\.)yahoo\./.test(h)) return 'Yahoo!検索';
+    if (/(^|\.)bing\.com$/.test(h)) return 'Bing検索';
+    if (/instagram\.com$/.test(h)) return 'Instagram';
+    if (/facebook\.com$|fb\.com$/.test(h)) return 'Facebook';
+    if (/tiktok\.com$/.test(h)) return 'TikTok';
+    if (/^t\.co$|twitter\.com$|x\.com$/.test(h)) return 'X';
+    if (/line\.me$|line-apps\.com$/.test(h)) return 'LINE';
+    if (/lic-inc\.co\.jp$/.test(h)) return 'Lic.サイト・Journal';
+    return 'referral:' + h;
+  };
+  const curSrc = pick('src') || (pick('utm_source') ? [pick('utm_source'), pick('utm_campaign')].filter(Boolean).join('/') : '') || (q.get('gclid') || q.get('gbraid') || q.get('wbraid') ? 'Google広告' : '') || (q.get('fbclid') ? fromRef(refHost) + '（広告・リンク）' : '') || fromRef(refHost);
+
+  // 最初の流入元（90日保持）。パラメータ付きで来たら上書き
   const prev = read();
-  const hit = pick('src') || pick('utm_source') || pick('utm_campaign');
+  const hit = pick('src') || pick('utm_source') || pick('utm_campaign') || q.get('gclid');
   if (hit) {
-    write({ src: pick('src') || [pick('utm_source'), pick('utm_campaign')].filter(Boolean).join('/'), utm_source: pick('utm_source'), utm_medium: pick('utm_medium'), utm_campaign: pick('utm_campaign'), utm_content: pick('utm_content'), landing: (() => { try { return decodeURIComponent(location.pathname + location.search); } catch (e) { return location.pathname + location.search; } })(), referrer: document.referrer, first_at: prev ? prev.first_at : now, at: Date.now() });
+    write({ src: curSrc, utm_source: pick('utm_source'), utm_medium: pick('utm_medium'), utm_campaign: pick('utm_campaign'), utm_content: pick('utm_content'), landing: (() => { try { return decodeURIComponent(location.pathname + location.search); } catch (e) { return location.pathname + location.search; } })(), referrer: document.referrer, first_at: prev ? prev.first_at : now, at: Date.now() });
   } else if (!prev) {
-    let ref = '';
-    try { ref = document.referrer ? new URL(document.referrer).hostname : ''; } catch (e) {}
-    const self = ref && ref === location.hostname;
-    write({ src: self ? '直接' : (ref ? 'referral:' + ref : '直接'), landing: location.pathname, referrer: document.referrer, first_at: now, at: Date.now() });
+    write({ src: curSrc, landing: location.pathname, referrer: document.referrer, first_at: now, at: Date.now() });
   }
-  let sid = '';
-  try { sid = sessionStorage.getItem('adk_sid') || Math.random().toString(36).slice(2, 10); sessionStorage.setItem('adk_sid', sid); } catch (e) {}
+  const first = read() || { src: curSrc };
+
+  // 訪問者ID（ブラウザ単位）・セッションID（タブを閉じるまで）・訪問回数
+  let vid = ls.get('adk_vid');
+  if (!vid) { vid = rid(); ls.set('adk_vid', vid); }
+  let sid = ss.get('adk_sid');
+  if (!sid) {
+    sid = rid(); ss.set('adk_sid', sid);
+    ls.set('adk_visits', String((+ls.get('adk_visits') || 0) + 1));
+  }
+  const visits = +ls.get('adk_visits') || 1;
+
+  // 計測しない：社内フラグ・bot・自動ブラウザ
+  if (q.get('staff') === '1') ls.set('adk_staff', '1');
+  if (q.get('staff') === '0') ls.del('adk_staff');
+  const ua = navigator.userAgent || '';
+  const isBot = navigator.webdriver || /bot|crawl|spider|slurp|headless|lighthouse|pagespeed|preview|facebookexternalhit|embedly|monitor|uptime|python|curl|wget|phantom|puppeteer|playwright/i.test(ua);
+  const track = !!ENDPOINT && !isBot && ls.get('adk_staff') !== '1';
+  const device = /iPad|Tablet/i.test(ua) ? 'タブレット' : (/Mobi|Android|iPhone/i.test(ua) ? 'スマホ' : 'PC');
+
+  const send = (t, extra) => {
+    if (!track) return;
+    const body = JSON.stringify(Object.assign({
+      t: t, path: location.pathname, src: curSrc, first_src: first.src || '', ref: document.referrer.slice(0, 300),
+      utm_source: pick('utm_source'), utm_medium: pick('utm_medium'), utm_campaign: pick('utm_campaign'), utm_content: pick('utm_content'),
+      device: device, vid: vid, sid: sid, visits: visits, ua: ua.slice(0, 250),
+    }, extra || {}));
+    try {
+      if (t === 'leave' && navigator.sendBeacon) { navigator.sendBeacon(ENDPOINT, new Blob([body], { type: 'text/plain;charset=utf-8' })); return; }
+      fetch(ENDPOINT, { method: 'POST', mode: 'no-cors', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: body, keepalive: true });
+    } catch (e) {}
+  };
+
+  // どこまで読んだか（セクション単位）と最大スクロール率
+  const SECTIONS = [['fv', 'ファーストビュー'], ['service', 'サービス'], ['worry', 'お悩み'], ['reason', '解決策'], ['strength', '3つの強み'], ['case', '実績'], ['flow', '導入の流れ'], ['price', '料金'], ['faq', 'よくある質問'], ['contact', '無料相談']];
+  let deepest = 0, maxScroll = 0, cta = 0;
+  const els = SECTIONS.map(([id]) => id === 'fv' ? document.querySelector('.fv') : document.getElementById(id));
+  const measure = () => {
+    const vh = window.innerHeight, doc = document.documentElement;
+    const h = Math.max(doc.scrollHeight - vh, 1);
+    maxScroll = Math.max(maxScroll, Math.min(100, Math.round(window.scrollY / h * 100)));
+    els.forEach((el, i) => { if (el && i > deepest && el.getBoundingClientRect().top < vh * 0.6) deepest = i; });
+  };
+  window.addEventListener('scroll', measure, { passive: true });
+  const t0 = Date.now();
+  let left = false, hiddenAt = 0, hiddenMs = 0;
+  const leave = () => {
+    if (left) return;
+    left = true;
+    measure();
+    const sec = Math.round((Date.now() - t0 - hiddenMs) / 1000);
+    send('leave', { sec: Math.min(sec, 3600), scroll: maxScroll, section: els.some(Boolean) ? SECTIONS[deepest][1] : '', section_no: deepest + 1, cta: cta });
+  };
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') { hiddenAt = Date.now(); leave(); }
+    else if (hiddenAt) { hiddenMs += Date.now() - hiddenAt; hiddenAt = 0; left = false; }
+  });
+  window.addEventListener('pagehide', leave);
+
+  send('pv', { title: document.title.slice(0, 120) });
+  setTimeout(measure, 500);
+
+  // 相談ボタン（カレンダーを開いた）
+  window.adkTrackCta = (label) => { cta++; send('cta', { label: (label || '').slice(0, 60), section: els.some(Boolean) ? SECTIONS[deepest][1] : '' }); };
+
   window.adkTrackBooking = () => {
     if (!ENDPOINT) return;
     const v = read() || { src: '不明' };
-    const body = JSON.stringify(Object.assign({}, v, { sid: sid, page: location.pathname }));
+    const body = JSON.stringify(Object.assign({}, v, { sid: sid, vid: vid, page: location.pathname }));
     try { fetch(ENDPOINT, { method: 'POST', mode: 'no-cors', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: body, keepalive: true }); } catch (e) {}
   };
 })();
@@ -153,6 +238,7 @@
     e.preventDefault();
     modal.showModal();
     adsCv(window.ADKURU_CV);
+    window.adkTrackCta && window.adkTrackCta((b.textContent || '').trim() || b.className);
     document.body.style.overflow = 'hidden';
     initCalendar();
     watchFallback();

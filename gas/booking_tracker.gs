@@ -75,9 +75,10 @@ function doPost(e) {
   lock.waitLock(10000);
   try {
     const d = JSON.parse((e && e.postData && e.postData.contents) || '{}');
+    if (d.t === 'pv' || d.t === 'leave' || d.t === 'cta') { adkAccess_(d); return ContentService.createTextOutput('ok'); }
     const sh = adkSheet_(SpreadsheetApp.getActive(), ADK.TAB_LOG);
     const s = v => String(v == null ? '' : v).slice(0, 300);
-    sh.appendRow([new Date(), s(d.src || '不明'), s(d.utm_source), s(d.utm_medium), s(d.utm_campaign), s(d.utm_content), s(d.landing), s(d.referrer), s(d.first_at), s(d.sid), '']);
+    sh.appendRow([new Date(), s(d.src || '不明'), s(d.utm_source), s(d.utm_medium), s(d.utm_campaign), s(d.utm_content), s(d.landing), s(d.referrer), s(d.first_at), s(d.sid), '', s(d.vid, 40)]);
   } finally {
     lock.releaseLock();
   }
@@ -292,4 +293,176 @@ function adkBand_(sh, n) {
   sh.getBandings().forEach(b => b.remove());
   sh.getRange(1, 1, Math.max(sh.getMaxRows(), 200), n).applyRowBanding(SpreadsheetApp.BandingTheme.LIGHT_GREY, true, false)
     .setHeaderRowColor(ADK_C.navy).setFirstRowColor('#ffffff').setSecondRowColor(ADK_C.band);
+}
+
+
+/* =====================================================================
+ * アクセス計測（2026-11-05 追加）
+ * - サイトの閲覧・離脱（滞在秒・どこまで読んだか）・相談ボタンを「アクセスログ」に1行ずつ追加
+ * - 1時間ごとの summarizeAccess_ が「アクセス_日別」「アクセス_流入元」「アクセス_読了」「アクセス_訪問者」を作り直す
+ * - 初回だけ setupAccess() を実行。doPost を変えたので「デプロイを管理」で新バージョンにする
+ * ===================================================================== */
+const ACC = {
+  TAB_LOG: 'アクセスログ',
+  TAB_DAY: 'アクセス_日別',
+  TAB_SRC: 'アクセス_流入元',
+  TAB_READ: 'アクセス_読了',
+  TAB_VIS: 'アクセス_訪問者',
+  VISITOR_ROWS: 1000,
+  BOT_UA: /bot|crawl|spider|slurp|headless|lighthouse|pagespeed|preview|facebookexternalhit|embedly|monitor|uptime|python|curl|wget|phantom|puppeteer|playwright/i,
+};
+const ACC_SECTIONS = ['ファーストビュー', 'サービス', 'お悩み', '解決策', '3つの強み', '実績', '導入の流れ', '料金', 'よくある質問', '無料相談'];
+const ACC_LOG_HEAD = ['日時', '種類', 'ページ', '流入元（今回）', '流入元（初回）', '参照元URL', 'utm_source', 'utm_medium', 'utm_campaign', 'utm_content', '端末', '滞在秒', 'スクロール%', 'どこまで読んだか', 'セクション番号', 'ボタン', '訪問者ID', 'セッションID', '訪問回数', 'ブラウザ（UA）'];
+
+function setupAccess() {
+  const ss = SpreadsheetApp.getActive();
+  ss.setSpreadsheetTimeZone('Asia/Tokyo');
+  const log = adkSheet_(ss, ACC.TAB_LOG);
+  if (log.getLastRow() === 0) adkHead_(log, ACC_LOG_HEAD);
+  log.setTabColor(ADK_C.gray);
+  // 予約ログに訪問者IDの列を足す（予約した人がどのページをどう見たかをつなぐため）
+  const blog = ss.getSheetByName(ADK.TAB_LOG);
+  if (blog && !blog.getRange('L1').getValue()) blog.getRange('L1').setValue('訪問者ID').setFontWeight('bold').setBackground(ADK_C.gray).setFontColor('#ffffff');
+  [ACC.TAB_DAY, ACC.TAB_SRC, ACC.TAB_READ, ACC.TAB_VIS].forEach(n => adkSheet_(ss, n).setTabColor('#2f9e6e'));
+  ScriptApp.getProjectTriggers().filter(t => t.getHandlerFunction() === 'summarizeAccess_').forEach(t => ScriptApp.deleteTrigger(t));
+  ScriptApp.newTrigger('summarizeAccess_').timeBased().everyHours(1).create();
+  // タブの並び：見方 → アクセス集計 → 予約まわり → システム用
+  const order = [ADK_TAB_HOW, ACC.TAB_DAY, ACC.TAB_SRC, ACC.TAB_READ, ACC.TAB_VIS, ADK.TAB_BOOK, ADK.TAB_SUM, ADK_TAB_LINK, ACC.TAB_LOG, ADK.TAB_LOG, ADK.TAB_CONF];
+  order.filter(n => ss.getSheetByName(n)).forEach((n, i) => { ss.setActiveSheet(ss.getSheetByName(n)); ss.moveActiveSheet(i + 1); });
+  adkHowAccess_(ss);
+  summarizeAccess_();
+  ss.setActiveSheet(ss.getSheetByName(ACC.TAB_DAY));
+  return 'ok';
+}
+
+function adkAccess_(d) {
+  const ua = String(d.ua || '');
+  if (ACC.BOT_UA.test(ua)) return; // 念のためサーバー側でも bot を落とす
+  const s = (v, n) => String(v == null ? '' : v).slice(0, n || 300);
+  const kind = { pv: '閲覧', leave: '離脱', cta: '相談ボタン' }[d.t];
+  const ss = SpreadsheetApp.getActive();
+  const log = ss.getSheetByName(ACC.TAB_LOG) || (() => { const sh = adkSheet_(ss, ACC.TAB_LOG); adkHead_(sh, ACC_LOG_HEAD); return sh; })();
+  log.appendRow([
+    new Date(), kind, s(d.path, 120), s(d.src, 120), s(d.first_src, 120), s(d.ref), s(d.utm_source, 100), s(d.utm_medium, 100), s(d.utm_campaign, 100), s(d.utm_content, 100),
+    s(d.device, 10), d.t === 'leave' ? Number(d.sec) || 0 : '', d.t === 'leave' ? Number(d.scroll) || 0 : '', s(d.section, 30), d.t === 'leave' ? Number(d.section_no) || '' : '',
+    d.t === 'cta' ? s(d.label, 60) : '', s(d.vid, 40), s(d.sid, 40), Number(d.visits) || 1, s(ua, 250),
+  ]);
+}
+
+/* ---------- 集計（1時間ごと） ---------- */
+function summarizeAccess_() {
+  const ss = SpreadsheetApp.getActive();
+  const log = ss.getSheetByName(ACC.TAB_LOG);
+  if (!log) return 'アクセスログがありません';
+  const n = log.getLastRow() - 1;
+  const v = n > 0 ? log.getRange(2, 1, n, ACC_LOG_HEAD.length).getValues().filter(r => r[0] !== '') : [];
+  const tz = ss.getSpreadsheetTimeZone();
+  const day = d => Utilities.formatDate(new Date(d), tz, 'yyyy/MM/dd');
+  const since30 = Date.now() - 30 * 864e5;
+  const avg = xs => xs.length ? Math.round(xs.reduce((p, c) => p + c, 0) / xs.length) : '';
+  const pct = (a, b) => b ? Math.round(a / b * 1000) / 10 : '';
+
+  // 予約した訪問者（流入経路ログの訪問者ID）と、日別の予約数（予約一覧）
+  const blog = ss.getSheetByName(ADK.TAB_LOG);
+  const bv = blog && blog.getLastRow() > 1 ? blog.getRange(2, 1, blog.getLastRow() - 1, 12).getValues() : [];
+  const bookVid = new Set(bv.map(r => r[11]).filter(Boolean));
+  const book = ss.getSheetByName(ADK.TAB_BOOK);
+  const bookRows = book ? book.getRange(2, 1, Math.max(adkLastRow_(book) - 1, 1), 1).getValues().filter(r => r[0] !== '') : [];
+  const bookDay = {};
+  bookRows.forEach(r => { const k = day(r[0]); bookDay[k] = (bookDay[k] || 0) + 1; });
+
+  // セッション（1回の訪問）単位にまとめる
+  const S = {};
+  v.forEach(r => {
+    const sid = r[17] || ('_' + r[16] + day(r[0]));
+    const x = S[sid] || (S[sid] = { at: r[0], src: '', vid: r[16], pv: 0, sec: 0, scroll: 0, sec_no: 0, cta: false, device: r[10], visits: Number(r[18]) || 1 });
+    if (r[1] === '閲覧') { x.pv++; if (!x.src) x.src = r[3] || '不明'; if (!x.device) x.device = r[10]; }
+    else if (r[1] === '離脱') { x.sec = Math.max(x.sec, Number(r[11]) || 0); x.scroll = Math.max(x.scroll, Number(r[12]) || 0); x.sec_no = Math.max(x.sec_no, Number(r[14]) || 0); }
+    else if (r[1] === '相談ボタン') x.cta = true;
+    if (!x.src && r[3]) x.src = r[3];
+  });
+  const sessions = Object.keys(S).map(k => S[k]).filter(x => x.pv > 0);
+  const firstSeen = {};
+  sessions.slice().sort((a, b) => new Date(a.at) - new Date(b.at)).forEach(x => { if (!(x.vid in firstSeen)) firstSeen[x.vid] = day(x.at); });
+
+  // 日別
+  const D = {};
+  sessions.forEach(x => {
+    const k = day(x.at), a = D[k] || (D[k] = { pv: 0, ses: 0, vis: new Set(), nw: new Set(), cta: 0, sec: [], price: 0, measured: 0 });
+    a.pv += x.pv; a.ses++; a.vis.add(x.vid); if (firstSeen[x.vid] === k) a.nw.add(x.vid);
+    if (x.cta) a.cta++;
+    if (x.sec_no) { a.measured++; if (x.sec_no >= 8) a.price++; a.sec.push(x.sec); }
+  });
+  const drows = Object.keys(D).sort().reverse().map(k => { const a = D[k]; return [k, a.pv, a.ses, a.vis.size, a.nw.size, a.cta, pct(a.cta, a.ses), bookDay[k] || 0, avg(a.sec), pct(a.price, a.measured)]; });
+  adkWriteAcc_(ss, ACC.TAB_DAY, '日別の推移（新しい順）。bot・自動ブラウザ・社内（?staff=1 を付けて開いたブラウザ）は除外済み', ['日付', '閲覧数', '訪問数', '訪問者数', 'うち初めての人', '相談ボタンを押した訪問', '相談ボタン率（%）', '予約数', '平均滞在（秒）', '料金まで読んだ割合（%）'], drows);
+
+  // 流入元
+  const R = {};
+  sessions.forEach(x => {
+    const a = R[x.src] || (R[x.src] = { ses: 0, ses30: 0, vis: new Set(), cta: 0, book: new Set(), sec: [], price: 0, measured: 0, sp: 0 });
+    a.ses++; if (+new Date(x.at) >= since30) a.ses30++; a.vis.add(x.vid);
+    if (x.cta) a.cta++;
+    if (bookVid.has(x.vid)) a.book.add(x.vid);
+    if (x.device === 'スマホ') a.sp++;
+    if (x.sec_no) { a.measured++; if (x.sec_no >= 8) a.price++; a.sec.push(x.sec); }
+  });
+  const srows = Object.keys(R).map(k => { const a = R[k]; return [k, a.ses, a.ses30, a.vis.size, a.cta, pct(a.cta, a.ses), a.book.size, avg(a.sec), pct(a.price, a.measured), pct(a.sp, a.ses)]; }).sort((x, y) => y[1] - x[1]);
+  adkWriteAcc_(ss, ACC.TAB_SRC, '流入元ごとの訪問（1回の訪問を1件。今回どこから来たかで数える）', ['流入元', '訪問数（全期間）', '訪問数（30日）', '訪問者数', '相談ボタンを押した訪問', '相談ボタン率（%）', '予約した人', '平均滞在（秒）', '料金まで読んだ割合（%）', 'スマホの割合（%）'], srows);
+
+  // 読了（どのセクションまで読まれたか）
+  const measured = sessions.filter(x => x.sec_no);
+  const m30 = measured.filter(x => +new Date(x.at) >= since30);
+  const rrows = ACC_SECTIONS.map((name, i) => {
+    const all = measured.filter(x => x.sec_no >= i + 1).length, r30 = m30.filter(x => x.sec_no >= i + 1).length;
+    const stop = measured.filter(x => x.sec_no === i + 1).length;
+    return [i + 1, name, all, pct(all, measured.length), r30, pct(r30, m30.length), stop, pct(stop, measured.length)];
+  });
+  adkWriteAcc_(ss, ACC.TAB_READ, `トップページをどこまで読んだか（離脱を計測できた訪問 ${measured.length} 件のうち、そのセクションまでスクロールした割合）`, ['順番', 'セクション', '到達した訪問（全期間）', '到達率（%）', '到達した訪問（30日）', '到達率（30日・%）', 'ここで離脱した訪問', '離脱の割合（%）'], rrows);
+
+  // 訪問者
+  const P = {};
+  sessions.slice().sort((a, b) => new Date(a.at) - new Date(b.at)).forEach(x => {
+    const a = P[x.vid] || (P[x.vid] = { first: x.at, last: x.at, fsrc: x.src, lsrc: x.src, visits: 0, pv: 0, deep: 0, cta: 0, sec: 0, device: x.device });
+    a.last = x.at; a.lsrc = x.src; a.visits++; a.pv += x.pv; a.deep = Math.max(a.deep, x.sec_no); a.sec += x.sec; if (x.cta) a.cta++;
+  });
+  const vrows = Object.keys(P).map(k => { const a = P[k]; return [a.last, a.first, a.fsrc, a.lsrc, a.device, a.visits, a.pv, a.sec, a.deep ? ACC_SECTIONS[a.deep - 1] : '', a.cta, bookVid.has(k) ? '予約した' : '', k]; })
+    .sort((x, y) => new Date(y[0]) - new Date(x[0])).slice(0, ACC.VISITOR_ROWS);
+  adkWriteAcc_(ss, ACC.TAB_VIS, `訪問者（1人＝1行、最近来た順に${ACC.VISITOR_ROWS}人まで。同じブラウザを同じ人とみなす）`, ['最後に来た日時', '初めて来た日時', '流入元（初回）', '流入元（最後）', '端末', '訪問回数', '閲覧ページ数', '合計滞在（秒）', 'いちばん深く読んだところ', '相談ボタンを押した回数', '予約', '訪問者ID'], vrows);
+  if (vrows.length) ss.getSheetByName(ACC.TAB_VIS).getRange(3, 1, vrows.length, 2).setNumberFormat('yyyy/mm/dd hh:mm');
+  return 'ok';
+}
+
+/** 集計タブを丸ごと書き直す（1行目=説明、2行目=見出し、3行目〜） */
+function adkWriteAcc_(ss, name, note, head, rows) {
+  const sh = adkSheet_(ss, name);
+  sh.clear();
+  sh.getRange(1, 1).setValue(note + '　最終更新：' + Utilities.formatDate(new Date(), ss.getSpreadsheetTimeZone(), 'yyyy/MM/dd HH:mm')).setFontColor(ADK_C.gray);
+  sh.getRange(2, 1, 1, head.length).setValues([head]).setFontWeight('bold').setBackground(ADK_C.navy).setFontColor('#ffffff').setWrap(true).setVerticalAlignment('middle');
+  sh.setFrozenRows(2);
+  sh.setColumnWidth(1, 150);
+  for (let i = 2; i <= head.length; i++) sh.setColumnWidth(i, 120);
+  if (rows.length) sh.getRange(3, 1, rows.length, head.length).setValues(rows).setVerticalAlignment('top');
+  else sh.getRange(3, 1).setValue('まだデータがありません');
+  sh.getDataRange().setFontFamily('Arial');
+}
+
+/** 「見方」タブにアクセス計測の説明を足す（何度実行してもOK） */
+function adkHowAccess_(ss) {
+  const how = ss.getSheetByName(ADK_TAB_HOW);
+  if (!how) return;
+  const start = 18;
+  how.getRange(start, 1, 10, 2).clear();
+  const lines = [
+    ['アクセス計測（1時間ごとに更新）', ''],
+    ['アクセス_日別', '日ごとの閲覧数・訪問者数・相談ボタンを押した数・予約数・平均滞在・料金まで読んだ割合。'],
+    ['アクセス_流入元', 'どこから来た訪問か（Google検索・Google広告・Instagram・?src= のコードなど）ごとの数と、相談ボタン率・予約した人。'],
+    ['アクセス_読了', 'トップページをどのセクションまで読んだか。離脱の多いセクションがわかります。'],
+    ['アクセス_訪問者', '1人＝1行。何回来て、どこまで読んで、相談ボタンを押したか。'],
+    ['除外しているもの', 'bot・自動ブラウザ、社内のブラウザ。社内の人は一度 https://recruit.adkuru.com/?staff=1 を開くと、そのブラウザは以後数えません（?staff=0 で解除）。'],
+    ['アクセスログ', 'システム用（灰色）。編集しないでください。'],
+  ];
+  how.getRange(start, 1, lines.length, 2).setValues(lines);
+  how.getRange(start, 1, 1, 2).setBackground(ADK_C.navy).setFontColor('#ffffff').setFontWeight('bold');
+  how.getRange(start + 1, 1, lines.length - 1, 1).setFontWeight('bold').setFontColor(ADK_C.ink);
+  how.getRange(start, 1, lines.length, 2).setVerticalAlignment('middle').setWrap(true);
 }
